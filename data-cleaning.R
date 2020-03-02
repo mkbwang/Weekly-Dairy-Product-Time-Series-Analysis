@@ -43,4 +43,5 @@ colnames(combined_data) = c("date", "butter", "cheese", "whey", "milk")
 dateranges = seq(combined_data$date[1], by="week", length = nrow(combined_data))
 final_data = combined_data %>% filter(date %in% dateranges)
 
+write.csv(final_data, "cleaned_data.csv", row.names=FALSE)
 
