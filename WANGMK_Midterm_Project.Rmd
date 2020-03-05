@@ -1,0 +1,139 @@
+---
+title: "STATS 531 Midterm Project"
+author: "Mukai Wang 98830336"
+date: "3/5/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+library(lubridate)
+library(dplyr)
+library(ggplot2)
+library(reshape2)
+```
+
+
+# Introduction
+THE SIGNIFICANCE OF MONITORING DAIRY PRODUCT PRICES.
+
+# Data Cleaning and Exploration
+
+```{r, echo=FALSE}
+butter = read.csv("https://raw.githubusercontent.com/skybullbobby/Weekly-Dairy-Product-Time-Series-Analysis/master/weekly-dairy-product-prices/Butter.csv")
+```
+
+```{r, echo=FALSE}
+data_process = function(rawdata){
+  # fix the date time formats of three columns
+  rawdata$Week.Ending.Date = as.Date(rawdata$Week.Ending.Date, format='%m/%d/%Y')
+  rawdata$Report.Date = as.Date(rawdata$Report.Date, format='%m/%d/%Y')
+  rawdata$Date = as.Date(rawdata$Date, format='%m/%d')
+  year(rawdata$Date) = year(rawdata$Week.Ending.Date)
+  # only need the date and weighted prices
+  subsetdata = rawdata[,c("Date","Weighted.Prices")]
+  # remove duplicate values
+  removeduplicates = unique(subsetdata)
+  rankeddata = removeduplicates[order(removeduplicates$Date),]
+  # there are some values collected at the same date, so I aggregate them by averaging them
+  summarized_rankeddata = aggregate(rankeddata$Weighted.Prices,list(rankeddata$Date), mean)
+  colnames(summarized_rankeddata) = c("Date", "Price")
+  return(summarized_rankeddata)
+}
+processed_butter = data_process(butter)
+```
+
+
+```{r, echo=FALSE}
+dateranges = seq(processed_butter$Date[1], by="week", length = nrow(processed_butter))
+butterprice = processed_butter %>% filter(Date %in% dateranges)
+```
+
+```{r, echo=FALSE}
+ggplot(butterprice, aes(x=Date, y=Price))+geom_line()+ggtitle("Butter Price (dollar per pound)")
+```
+
+
+# Methodology
+
+
+# Results
+
+## Spectral Analysis for Short Term Trend
+
+```{r, echo=FALSE, fig.width=6, fig.height=9}
+date = seq(1,length(butterprice$Price))
+raw =ts(butterprice$Price, start=decimal_date(ymd("2012-03-03")), frequency = 365.25/7)
+long_term <- ts(loess(butterprice$Price~date,span=0.5)$fitted,
+                 start=decimal_date(ymd("2012-03-03")), frequency = 365.25/7)
+noise <- ts(butterprice$Price - loess(butterprice$Price~date,span=0.1)$fitted,
+                start=decimal_date(ymd("2012-03-03")), frequency = 365.25/7)
+short_term <- raw - long_term - noise
+
+plot(ts.union(raw, long_term, short_term, noise), main="Butter price trend")
+```
+
+
+```{r, echo=FALSE}
+bspectrum = spectrum(short_term, spans=c(3,5,3), main="Smoothed Spectrum for Short Term Butter Prices Fluctuation")
+```
+
+
+## ARMA Models for Long Term Trend
+
+```{r}
+long_term = as.vector(long_term)
+slr = lm(long_term~date)
+summary(slr)
+```
+
+
+
+
+
+```{r}
+slrresiduals = slr$residuals
+plot(slrresiduals, main="Residual Scatter Plot")
+```
+
+
+```{r}
+acf(slr$residuals, lag.max=100)
+```
+
+```{r}
+aic_table <- function(data ,P, Q){
+  table <- matrix(NA,(P+1),(Q+1))
+  for(p in 0:P){
+    for(q in 0:Q){
+      table[p+1, q+1] <- arima(data,order=c(p,1,q))$aic
+    }
+  }
+  dimnames(table) <- list(paste("AR",0:P, sep=""),paste("MA",0:Q,sep=""))
+  table
+}
+
+# search for optimal parameter
+butter_long_aic <- aic_table(slrresiduals, 4, 5)
+
+
+```
+
+
+```{r}
+model <- arima(slrresiduals, order=c(2,1,1))
+acf(model$residuals, lag.max=52)
+```
+
+
+```{r}
+model2 <- arima(slrresiduals, order=c(2,1,1),
+  seasonal=list(order=c(2,0,0), period=18))
+```
+
+```{r}
+acf(model2$residuals, lag.max=52)
+
+model2
+```
+
