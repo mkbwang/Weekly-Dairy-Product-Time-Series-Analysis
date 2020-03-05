@@ -15,9 +15,18 @@ library(reshape2)
 
 
 # Introduction
-THE SIGNIFICANCE OF MONITORING DAIRY PRODUCT PRICES.
+Keeping track of the price of industrial scale food is an important measure to regulate the food market. [The Mandatory Price Reporting Act of 2010](https://www.congress.gov/111/plaws/publ239/PLAW-111publ239.pdf) requires the USDA to release dairy product sales information on or before Wednesday at 3:00 pm EST (unless affected by a Federal Holiday). This weekly reported price information offers insight into time trend of several dairy products in the past few years.
+
+The data is collected from [Kaggle](https://www.kaggle.com/sohier/weekly-dairy-product-prices) and belongs to [USDA](https://mpr.datamart.ams.usda.gov/menu.do?path=\Products\Dairy). The data contain prices (dollars per pound) of five different kinds of dairy products from March 2012 to December 2017. In this project, I am going to focus on the fluctuation of butter price. 
 
 # Data Cleaning and Exploration
+
+The data cleaning addresses several issues with the raw data,
+
+* There are duplicate entries in the dataset that I need to remove.
+* There are several entries of prices taken on the same day. My decision is to aggregate these prices and take the average.
+* Some adjacent time points don't differ by 7 days. My approach is to only retain those time points whose date differences from the very first day in the dataset (2012/03/03) are multiples of 7.
+
 
 ```{r, echo=FALSE}
 butter = read.csv("https://raw.githubusercontent.com/skybullbobby/Weekly-Dairy-Product-Time-Series-Analysis/master/weekly-dairy-product-prices/Butter.csv")
@@ -49,12 +58,22 @@ dateranges = seq(processed_butter$Date[1], by="week", length = nrow(processed_bu
 butterprice = processed_butter %>% filter(Date %in% dateranges)
 ```
 
-```{r, echo=FALSE}
+After my data processing, I have 286 data points from 2012/03/03 to 2017/08/19. I plot the price trend below.
+
+```{r, echo=FALSE, fig.width=10, fig.height=7}
 ggplot(butterprice, aes(x=Date, y=Price))+geom_line()+ggtitle("Butter Price (dollar per pound)")
 ```
 
+Based on this plot, I can confidently say that there is definitely strong trend in the data (not simply white noise). There are large short term fluctuations together with a seemingly increasing trend on a global scale.
 
 # Methodology
+
+Based on the plot of the raw prices above, I decide on the analysis scheme as follows:
+
+1. Decompose the price trend into a long term trend, a short term trend and noise using loess smoothing with two different spans.
+2. For the short term trend, I plan to carry out spectrum analysis and identify potential significant frequencies. 
+3. For the long term trend, I plan to use ARMA models and their derivatives(SARMA, regression with ARMA errors) to explain the time series trend parametrically.
+
 
 
 # Results
@@ -76,6 +95,7 @@ plot(ts.union(raw, long_term, short_term, noise), main="Butter price trend")
 
 ```{r, echo=FALSE}
 bspectrum = spectrum(short_term, spans=c(3,5,3), main="Smoothed Spectrum for Short Term Butter Prices Fluctuation")
+abline(h=0.5e-2,lty="dashed",col="red")
 ```
 
 
@@ -133,7 +153,10 @@ model2 <- arima(slrresiduals, order=c(2,1,1),
 
 ```{r}
 acf(model2$residuals, lag.max=52)
-
 model2
 ```
+
+# Discussion
+
+# References
 
