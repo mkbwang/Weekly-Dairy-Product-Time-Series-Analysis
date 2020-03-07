@@ -60,7 +60,7 @@ butterprice = processed_butter %>% filter(Date %in% dateranges)
 
 After my data processing, I have 286 data points from 2012/03/03 to 2017/08/19. I plot the price trend below.
 
-```{r, echo=FALSE, fig.width=10, fig.height=7}
+```{r, echo=FALSE, fig.width=9, fig.height=6}
 ggplot(butterprice, aes(x=Date, y=Price))+geom_line()+ggtitle("Butter Price (dollar per pound)")
 ```
 
@@ -80,6 +80,9 @@ Based on the plot of the raw prices above, I decide on the analysis scheme as fo
 
 ## Spectral Analysis for Short Term Trend
 
+First I separate the signal into long term trend, short term trend and noise. The long term trend is acquired by loess smoothing at a span of 0.5. The noise is acquired by subtracting the original signal by the signal after loess smoothing at a span of 0.1. The choices of the spans follow the practice in [class](https://ionides.github.io/531w20/08/notes08.pdf).  The short term signal is calculated by subtracting the original signal by both the long term trend and the noise.
+
+
 ```{r, echo=FALSE, fig.width=6, fig.height=9}
 date = seq(1,length(butterprice$Price))
 raw =ts(butterprice$Price, start=decimal_date(ymd("2012-03-03")), frequency = 365.25/7)
@@ -89,39 +92,51 @@ noise <- ts(butterprice$Price - loess(butterprice$Price~date,span=0.1)$fitted,
                 start=decimal_date(ymd("2012-03-03")), frequency = 365.25/7)
 short_term <- raw - long_term - noise
 
-plot(ts.union(raw, long_term, short_term, noise), main="Butter price trend")
+plot(ts.union(raw, long_term, short_term, noise), main="Butter price trend(Dollar per Pound)")
 ```
 
+After that I plot the spectrum of the short term signal. I set the period to be a year (52 weeks). On the spectrum plot, I also draw a threshold line at $5\times 10^{-3}$ given that the smallest unit of price is one cent.
 
 ```{r, echo=FALSE}
-bspectrum = spectrum(short_term, spans=c(3,5,3), main="Smoothed Spectrum for Short Term Butter Prices Fluctuation")
+bspectrum = spectrum(short_term, spans=c(3,5,3), main="Smoothed Spectrum for Short Term Butter Prices Fluctuation", xlab="Cycles per Year")
 abline(h=0.5e-2,lty="dashed",col="red")
 ```
 
+On this spectrum, I notice a peak with spectrum density of `r round(max(bspectrum$spec), digits=3)` at `r bspectrum$freq[which.max(bspectrum$spec)]` cycles per year. Based on this result I can conclude that there is periodicity of one cycle per year.
 
 ## ARMA Models for Long Term Trend
+
+We have seen the long term trend plotted in the previous section. Based on the shape of the line we tend to fit a linear model first. Note that in the plot below, the x axis is the week number with the first observation in the data on 2012/03/03 set as one.
 
 ```{r}
 long_term = as.vector(long_term)
 slr = lm(long_term~date)
+plot(x=date, y=long_term, type="l", xlab="Week Number", ylab="Dollars Per Pound", main="Long Term Butter Price with Linear Regression Estimate")
+abline(slr,col="red", lty="dashed")
+```
+
+The linear approximation looks like a good fit. The summary statistic of the model confirms our guess with high R-square.
+```{r}
 summary(slr)
 ```
 
 
-
+Although the R square is very high, the scatterplot and the autocorrelation plot of the residuals tell us that the residuals violate the constant variance and independence assumption.
 
 
 ```{r}
 slrresiduals = slr$residuals
-plot(slrresiduals, main="Residual Scatter Plot")
+plot(slrresiduals, main="Residual Scatter Plot", pch=20, xlab="Week Number", ylab="Residual")
 ```
 
 
 ```{r}
-acf(slr$residuals, lag.max=100)
+acf(slr$residuals, lag.max=100, main="Autocorrelation of Residuals from Linear Regression")
 ```
 
-```{r}
+Given that the autocorrelation at small lags are very large, I decide to try ARMA models on differences of adjacent residuals to account for the trend. I carry out a grid search for a candidate ARIMA model, as taught in [class](https://ionides.github.io/531w20/05/notes05.pdf). 
+
+```{r, message=FALSE}
 aic_table <- function(data ,P, Q){
   table <- matrix(NA,(P+1),(Q+1))
   for(p in 0:P){
@@ -135,16 +150,53 @@ aic_table <- function(data ,P, Q){
 
 # search for optimal parameter
 butter_long_aic <- aic_table(slrresiduals, 4, 5)
-
-
+knitr::kable(butter_long_aic)
 ```
+
+The table tells us that ARIMA(2,1,1) model is the strongest candidate. Then I am going to fit the following model (written in lag operators). $Y_{n}$ is the price and $\epsilon_{n}$ is assumed to be white noise.
+
+$$(1-\phi_{1}B-\phi_{2}B^{2})[(1-B)Y_{n}]=(1+\psi_{1}B)\epsilon_{n}$$
 
 
 ```{r}
 model <- arima(slrresiduals, order=c(2,1,1))
-acf(model$residuals, lag.max=52)
+model
 ```
 
+```{r}
+ar_coef = model$coef[1:2]
+ma_coef = model$coef[3]
+ar_root_mod = Mod(polyroot(c(1, ar_coef)))[1]
+ma_root_mod = Mod(polyroot(c(1, ma_coef)))
+```
+
+
+The modulus of the two AR component roots is `r round(ar_root_mod, digits=3)` and the modulus of the MA component root is `r round(ma_root_mod, digits=3)`. Since all the roots fall outside the circle, I can say that this is a causal and invertible model. 
+
+I generated a simulated data.
+
+
+```{r}
+set.seed(slrresiduals[1])
+simulated_residuals = arima.sim(n=285, list(order=c(2,1,1), ar=ar_coef, ma=ma_coef), sd = sqrt(model$sigma2))
+simulated_price = predict(slr) + simulated_residuals
+```
+
+
+
+```{r}
+plot(x=date, y=simulated_price,type="l",  col="red", lty="dashed",  xlab="Week Number", ylab="Dollars Per Pound", main="Long Term Butter Price and Simulated Prices")
+lines(x=date, y=long_term, type="l")
+```
+
+
+I move on to check the autocorrelation of the residuals from the model
+
+```{r}
+acf(model$residuals, lag.max=52, main="Residuals of ARMA(2,1,1) Model")
+```
+
+I notice that there are significant correlations at lag 18 and 36. This phenomenon indicates that adding a SARMA term of lag 18 could possibly help.
 
 ```{r}
 model2 <- arima(slrresiduals, order=c(2,1,1),
