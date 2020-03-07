@@ -130,6 +130,7 @@ plot(slrresiduals, main="Residual Scatter Plot", pch=20, xlab="Week Number", yla
 ```
 
 
+
 ```{r}
 acf(slr$residuals, lag.max=100, main="Autocorrelation of Residuals from Linear Regression")
 ```
@@ -163,40 +164,40 @@ model <- arima(slrresiduals, order=c(2,1,1))
 model
 ```
 
+Thus our model is
+
+$$(1-1.828B+0.842B^{2})[(1-B)Y_{n}]=(1+0.941B)\epsilon_{n}$$
+ in which $\{\epsilon_{n}\}$ is a series of normal white noise with  a variance of $5.62\times 10^{-8}$.
+ 
+ 
 ```{r}
 ar_coef = model$coef[1:2]
 ma_coef = model$coef[3]
-ar_root_mod = Mod(polyroot(c(1, ar_coef)))[1]
+ar_root_mod = Mod(polyroot(c(1, ar_coef)))
 ma_root_mod = Mod(polyroot(c(1, ma_coef)))
 ```
 
 
-The modulus of the two AR component roots is `r round(ar_root_mod, digits=3)` and the modulus of the MA component root is `r round(ma_root_mod, digits=3)`. Since all the roots fall outside the circle, I can say that this is a causal and invertible model. 
-
-I generated a simulated data.
-
+The modulus of the two AR component roots are `r round(ar_root_mod[1], digits=3)` and `r round(ar_root_mod[2], digits=3)` and the modulus of the MA component root is `r round(ma_root_mod, digits=3)`. Since all the roots fall outside the circle, I can say that this is a causal and invertible model. 
 
 ```{r}
-set.seed(slrresiduals[1])
-simulated_residuals = arima.sim(n=285, list(order=c(2,1,1), ar=ar_coef, ma=ma_coef), sd = sqrt(model$sigma2))
-simulated_price = predict(slr) + simulated_residuals
+fitted_residuals = slrresiduals - model$residuals
+ARIMA_fits = predict(slr) + fitted_residuals
+plot(x=date, y=long_term, type="l", xlab="Week Number", ylab="Dollars Per Pound", main="Long Term Butter Price with Linear Regression + ARIMA Errors")
+lines(x=date, y=ARIMA_fits,col="red", lty="dashed")
 ```
 
+The original time series(black) and the fitted data(red dashed line) almost overlap, which indicates that it is a good fit.
 
+I also check the autocorrelation of the residuals from the model
 
 ```{r}
-plot(x=date, y=simulated_price,type="l",  col="red", lty="dashed",  xlab="Week Number", ylab="Dollars Per Pound", main="Long Term Butter Price and Simulated Prices")
-lines(x=date, y=long_term, type="l")
+model_acf =acf(model$residuals, lag.max=80, main="Residuals of ARMA(2,1,1) Model")
 ```
 
+I notice that there are significant correlations at lag 18, 36, 54 and 72. This phenomenon indicates that adding a SARMA term of lag 18 could possibly help. Given that the sign of correlation is different for lag 18 and lag 36, I would like to try a $SARIMA(2,1,1)\times (2,0,0)$. The model specification is
 
-I move on to check the autocorrelation of the residuals from the model
-
-```{r}
-acf(model$residuals, lag.max=52, main="Residuals of ARMA(2,1,1) Model")
-```
-
-I notice that there are significant correlations at lag 18 and 36. This phenomenon indicates that adding a SARMA term of lag 18 could possibly help.
+$$(1-\phi_{1}B-\phi_{2}B^{2})(1-\phi_{3}B^{18}-\phi_{4}B^{36})[(1-B)Y_{n}]=(1-\psi_{1}B)\epsilon_{n}$$
 
 ```{r}
 model2 <- arima(slrresiduals, order=c(2,1,1),
@@ -204,9 +205,33 @@ model2 <- arima(slrresiduals, order=c(2,1,1),
 ```
 
 ```{r}
-acf(model2$residuals, lag.max=52)
 model2
 ```
+
+According to the output, the model is
+
+$$(1-1.7731B+0.7864B^{2})(1-0.3332B^{18}-0.5243B^{36})[(1-B)Y_{n}]=(1+0.9243B)\epsilon_{n}$$
+
+
+```{r}
+ar_coef = model2$coef[1:2]
+ma_coef = model2$coef[3]
+sar_coef =model2$coef[4:5]
+
+ar_mod = Mod(polyroot(c(1, ar_coef)))
+ma_mod = Mod(polyroot(c(1, ma_coef)))
+sar_mod = Mod(polyroot(c(1, sar_coef)))
+```
+
+The AR component has two roots with modulus `r round(ar_mod[1], digits=3)` and `r round(ar_mod[2], digits=3)`. The MA component has two roots with modulus `r round(ma_mod, digits=3)`. The SAR component has two roots with modulus `r round(sar_mod[1], digits=3)` and `r round(sar_mod[2], digits=3)`. One of the AR roots is within the unit circle which makes the causality presumption a little problematic, but all the other roots are outside the unit circle, so the invertibility is preserved.
+
+
+In the autocorrelation plot, we can see that the autocorrelation at lag 18, 36, 54 and 72 are reduced by some amount, but lag 36 and 54 are still significant. Overall this is not a big improvement. It seems that we need some more delicate techniques to deal with the seasonality, but I am running out of time to try them.
+
+```{r}
+m2_acf = acf(model2$residuals, lag.max=80, main="Residuals of SARIMA(2,1,1)*(2,0,0) Model")
+```
+
 
 # Discussion
 
