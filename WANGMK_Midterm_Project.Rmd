@@ -7,10 +7,12 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = FALSE)
+if(!require('lubridate')){install.packages('lubridate')}
+if(!require('dplyr')){install.packages('dplyr', dependencies = TRUE)}
+if(!require('ggplot2')){install.packages('ggplot2')}
 library(lubridate)
 library(dplyr)
 library(ggplot2)
-library(reshape2)
 ```
 
 
